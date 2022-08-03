@@ -6,6 +6,8 @@ import * as github from '@actions/github'
 const urlParse =
   /^(?:https:\/\/)?github\.com\/(?<ownerType>orgs|users)\/(?<ownerName>[^/]+)\/projects\/(?<projectNumber>\d+)/
 
+type OwnerQueryTypes = 'organization' | 'user'
+
 interface ProjectNodeIDResponse {
   organization?: {
     projectV2: {
@@ -160,7 +162,7 @@ export async function addToProject(): Promise<void> {
   }
 }
 
-export function mustGetOwnerTypeQuery(ownerType?: string): 'organization' | 'user' {
+export function mustGetOwnerTypeQuery(ownerType?: string): OwnerQueryTypes {
   const ownerTypeQuery = ownerType === 'orgs' ? 'organization' : ownerType === 'users' ? 'user' : null
 
   if (!ownerTypeQuery) {
