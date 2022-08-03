@@ -455,8 +455,14 @@ describe('addToProject', () => {
 
     expect(gqlMock).toHaveBeenCalled()
     expect(infoSpy).toHaveBeenCalledWith('Creating project item')
-    // We shouldn't have any logs relating to the issue being skipped
-    expect(infoSpy.mock.calls.length).toEqual(1)
+
+    // We shouldn't have any logs relating to the issue being skipped due to `label-operator` input
+    const callsSkippingIssuesBasedOnLabelOperator = infoSpy.mock.calls
+      .map(args => args[0].toLowerCase())
+      .filter(msg => msg.includes('skip'))
+      .filter(msg => msg.includes('labels'))
+    expect(callsSkippingIssuesBasedOnLabelOperator).toHaveLength(0)
+
     expect(outputs.itemId).toEqual('project-item-id')
   })
 
@@ -543,8 +549,14 @@ describe('addToProject', () => {
 
     expect(gqlMock).toHaveBeenCalled()
     expect(infoSpy).toHaveBeenCalledWith('Creating project item')
-    // We shouldn't have any logs relating to the issue being skipped
-    expect(infoSpy.mock.calls.length).toEqual(1)
+
+      // We shouldn't have any logs relating to the issue being skipped due to `label-operator` input
+    const callsSkippingIssuesBasedOnLabelOperator = infoSpy.mock.calls
+      .map(args => args[0].toLowerCase())
+      .filter(msg => msg.includes('skip'))
+      .filter(msg => msg.includes('labels'))
+    expect(callsSkippingIssuesBasedOnLabelOperator).toHaveLength(0)
+    
     expect(outputs.itemId).toEqual('project-item-id')
   })
 
