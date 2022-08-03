@@ -39,14 +39,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.mustGetOwnerTypeQuery = exports.addToProject = void 0;
+exports.updateStatusFieldValueOnCard = exports.mustGetOwnerTypeQuery = exports.addToProject = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 // TODO: Ensure this (and the Octokit client) works for non-github.com URLs, as well.
 // https://github.com/orgs|users/<ownerName>/projects/<projectNumber>
 const urlParse = /^(?:https:\/\/)?github\.com\/(?<ownerType>orgs|users)\/(?<ownerName>[^/]+)\/projects\/(?<projectNumber>\d+)/;
 function addToProject() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     return __awaiter(this, void 0, void 0, function* () {
         const projectUrl = core.getInput('project-url', { required: true });
         const ghToken = core.getInput('github-token', { required: true });
@@ -110,6 +110,7 @@ function addToProject() {
         // Next, use the GraphQL API to add the issue to the project.
         // If the issue has the same owner as the project, we can directly
         // add a project item. Otherwise, we add a draft issue.
+        let itemId = undefined;
         if (issueOwnerName === projectOwnerName) {
             core.info('Creating project item');
             const addResp = yield octokit.graphql(`mutation addIssueToProject($input: AddProjectV2ItemByIdInput!) {
@@ -124,7 +125,8 @@ function addToProject() {
                     contentId
                 }
             });
-            core.setOutput('itemId', addResp.addProjectV2ItemById.item.id);
+            itemId = addResp.addProjectV2ItemById.item.id;
+            core.setOutput('itemId', itemId);
         }
         else {
             core.info('Creating draft issue in project');
@@ -141,8 +143,16 @@ function addToProject() {
                 projectId,
                 title: issue === null || issue === void 0 ? void 0 : issue.html_url
             });
-            core.setOutput('itemId', addResp.addProjectV2DraftIssue.projectItem.id);
+            itemId = addResp.addProjectV2DraftIssue.projectItem.id;
+            core.setOutput('itemId', itemId);
         }
+        if (projectId === undefined) {
+            throw new Error(`Project ID is undefined: ${(_k = idResp[ownerTypeQuery]) === null || _k === void 0 ? void 0 : _k.projectV2}. This shouldn't happen.`);
+        }
+        if (projectOwnerName === undefined) {
+            throw new Error(`Project Owner Name is undefined. This shouldn't happen.`);
+        }
+        yield updateStatusFieldValueOnCard(ownerTypeQuery, projectOwnerName, projectNumber, projectId, itemId);
     });
 }
 exports.addToProject = addToProject;
@@ -154,6 +164,79 @@ function mustGetOwnerTypeQuery(ownerType) {
     return ownerTypeQuery;
 }
 exports.mustGetOwnerTypeQuery = mustGetOwnerTypeQuery;
+/**
+ * Updates the "Status" field on a project card if an override value has been specified in the action's inputs.
+ *
+ * If no override value is specified, the field is left unchanged.
+ *
+ * @param projectOwnerTypeQuery The query type for the owner of the project.
+ * @param projectOwnerName
+ * @param projectNumber
+ * @param projectId
+ * @param itemId ID for the newly added card in the project
+ * @returns
+ */
+function updateStatusFieldValueOnCard(projectOwnerTypeQuery, projectOwnerName, projectNumber, projectId, itemId) {
+    var _a, _b, _c;
+    return __awaiter(this, void 0, void 0, function* () {
+        const ghToken = core.getInput('github-token', { required: true });
+        const statusFieldOverride = core.getInput('status-override', { required: false });
+        core.debug(`Status field override: ${statusFieldOverride}`);
+        if (statusFieldOverride.length === 0) {
+            core.info('Skipping status field update because no status-override input specified.');
+            return;
+        }
+        core.info('Overriding "Status" field value on project item');
+        const octokit = github.getOctokit(ghToken);
+        const statusFieldIdResp = yield octokit.graphql(`query getStatusFieldId($projectOwnerName: String! $projectNumber: Int!) {
+        ${projectOwnerTypeQuery}(login: $projectOwnerName) {
+            projectV2(number: $projectNumber) {
+              field(name: "Status") {
+                ... on ProjectV2FieldCommon {
+                  id
+                }
+                ... on ProjectV2SingleSelectField {
+                  options {
+                    id
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+    `, {
+            projectOwnerName,
+            projectNumber
+        });
+        const statusFieldId = (_a = statusFieldIdResp[projectOwnerTypeQuery]) === null || _a === void 0 ? void 0 : _a.projectV2.field.id;
+        const requiredOptionId = (_c = (((_b = statusFieldIdResp[projectOwnerTypeQuery]) === null || _b === void 0 ? void 0 : _b.projectV2.field.options) || []).find(option => option.name === statusFieldOverride)) === null || _c === void 0 ? void 0 : _c.id;
+        core.debug(`"Status" Field ID: ${statusFieldId}`);
+        core.debug(`\`status-override\` value's Single Select Field Option ID: ${requiredOptionId}`);
+        if (requiredOptionId === undefined) {
+            throw new Error(`Invalid "Status" field option value provided: ${statusFieldOverride}`);
+        }
+        const updateStatusFieldResp = yield octokit.graphql(`
+      mutation updateStatusFieldValue($projectId: ID!, $itemId: ID! $fieldId: ID!, $fieldOptionId: String!) {
+        updateProjectV2ItemFieldValue(input: {
+          projectId: $projectId, 
+          itemId: $itemId,
+          fieldId: $fieldId,
+          value: {singleSelectOptionId: $fieldOptionId}
+        }) {
+        projectV2Item {
+          updatedAt
+        }
+      }}
+    `, {
+            projectId,
+            itemId,
+            fieldId: statusFieldId,
+            fieldOptionId: requiredOptionId
+        });
+    });
+}
+exports.updateStatusFieldValueOnCard = updateStatusFieldValueOnCard;
 
 
 /***/ }),

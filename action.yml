@@ -16,6 +16,9 @@ inputs:
   label-operator:
     required: false
     description: The behavior of the labels filter, AND to match all labels, OR to match any label, NOT to exclude any listed label (default is OR)
+  status-override:
+    required: false
+    description: Change the "Status" field value of the issue/PR added to project from default value
 runs:
   using: 'node16'
   main: 'dist/index.js'
