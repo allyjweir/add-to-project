@@ -699,7 +699,7 @@ describe('addToProject', () => {
       {
         test: /getProject/,
         return: {
-          organization: {
+          user: {
             projectV2: {
               id: 'project-id'
             }
