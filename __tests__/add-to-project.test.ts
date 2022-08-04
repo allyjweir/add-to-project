@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 
-import {addToProject, mustGetOwnerTypeQuery} from '../src/add-to-project'
+import {addToProject, mustGetOwnerTypeQuery, updateStatusFieldValueOnCard} from '../src/add-to-project'
 
 describe('addToProject', () => {
   let outputs: Record<string, string>
@@ -455,8 +455,14 @@ describe('addToProject', () => {
 
     expect(gqlMock).toHaveBeenCalled()
     expect(infoSpy).toHaveBeenCalledWith('Creating project item')
-    // We shouldn't have any logs relating to the issue being skipped
-    expect(infoSpy.mock.calls.length).toEqual(1)
+
+    // We shouldn't have any logs relating to the issue being skipped due to `label-operator` input
+    const callsSkippingIssuesBasedOnLabelOperator = infoSpy.mock.calls
+      .map(args => args[0].toLowerCase())
+      .filter(msg => msg.includes('skip'))
+      .filter(msg => msg.includes('labels'))
+    expect(callsSkippingIssuesBasedOnLabelOperator).toHaveLength(0)
+
     expect(outputs.itemId).toEqual('project-item-id')
   })
 
@@ -543,8 +549,14 @@ describe('addToProject', () => {
 
     expect(gqlMock).toHaveBeenCalled()
     expect(infoSpy).toHaveBeenCalledWith('Creating project item')
-    // We shouldn't have any logs relating to the issue being skipped
-    expect(infoSpy.mock.calls.length).toEqual(1)
+
+    // We shouldn't have any logs relating to the issue being skipped due to `label-operator` input
+    const callsSkippingIssuesBasedOnLabelOperator = infoSpy.mock.calls
+      .map(args => args[0].toLowerCase())
+      .filter(msg => msg.includes('skip'))
+      .filter(msg => msg.includes('labels'))
+    expect(callsSkippingIssuesBasedOnLabelOperator).toHaveLength(0)
+
     expect(outputs.itemId).toEqual('project-item-id')
   })
 
@@ -687,7 +699,7 @@ describe('addToProject', () => {
       {
         test: /getProject/,
         return: {
-          organization: {
+          user: {
             projectV2: {
               id: 'project-id'
             }
@@ -783,6 +795,254 @@ describe('mustGetOwnerTypeQuery', () => {
     expect(() => {
       mustGetOwnerTypeQuery('unknown')
     }).toThrow(`Unsupported ownerType: unknown. Must be one of 'orgs' or 'users'`)
+  })
+})
+
+describe('updateFieldValueOnCase', () => {
+  let outputs: Record<string, string>
+
+  beforeEach(() => {
+    jest.spyOn(process.stdout, 'write').mockImplementation(() => true)
+  })
+
+  beforeEach(() => {
+    mockGetInput({})
+    outputs = mockSetOutput()
+  })
+
+  afterEach(() => {
+    github.context.payload = {}
+    jest.restoreAllMocks()
+  })
+
+  test('skips if status-override input not provided', async () => {
+    mockGetInput({
+      'github-token': 'gh_token'
+    })
+
+    const infoSpy = jest.spyOn(core, 'info')
+    await updateStatusFieldValueOnCard('organization', 'foo', 123, 'bar', 'baz')
+    expect(infoSpy).toHaveBeenLastCalledWith('Skipping status field update because no status-override input specified.')
+  })
+
+  test('updates status field for item in organization project', async () => {
+    mockGetInput({
+      'project-url': 'https://github.com/orgs/actions/projects/1',
+      'github-token': 'gh_token',
+      'status-override': 'In Progress'
+    })
+
+    github.context.payload = {
+      issue: {
+        number: 1,
+        labels: [],
+        // eslint-disable-next-line camelcase
+        html_url: 'https://github.com/actions/add-to-project/issues/74'
+      },
+      repository: {
+        name: 'add-to-project',
+        owner: {
+          login: 'actions'
+        }
+      }
+    }
+
+    const gqlMock = mockGraphQL(
+      {
+        test: /getProject/,
+        return: {
+          organization: {
+            projectV2: {
+              id: 'project-id'
+            }
+          }
+        }
+      },
+      {
+        test: /addProjectV2ItemById/,
+        return: {
+          addProjectV2ItemById: {
+            item: {
+              id: 'project-item-id'
+            }
+          }
+        }
+      },
+      {
+        test: /getStatusFieldId/,
+        return: {
+          organization: {
+            projectV2: {
+              field: {
+                id: 'status-field-id',
+                options: [
+                  {id: 'todo-option-id', name: 'To Do'},
+                  {id: 'in-progress-option-id', name: 'In Progress'},
+                  {id: 'done-option-id', name: 'Done'}
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        test: /updateStatusFieldValue/,
+        return: {
+          projectV2Item: {
+            updatedAt: 'fake-timestamp'
+          }
+        }
+      }
+    )
+
+    await addToProject()
+
+    expect(gqlMock).toBeCalledTimes(4)
+    expect(outputs.itemId).toEqual('project-item-id')
+  })
+
+  test('updates status field for item in user project', async () => {
+    mockGetInput({
+      'project-url': 'https://github.com/users/monalisa/projects/1',
+      'github-token': 'gh_token',
+      'status-override': 'In Progress'
+    })
+
+    github.context.payload = {
+      issue: {
+        number: 1,
+        labels: [],
+        // eslint-disable-next-line camelcase
+        html_url: 'https://github.com/actions/add-to-project/issues/74'
+      },
+      repository: {
+        name: 'add-to-project',
+        owner: {
+          login: 'actions'
+        }
+      }
+    }
+
+    const gqlMock = mockGraphQL(
+      {
+        test: /getProject/,
+        return: {
+          user: {
+            projectV2: {
+              id: 'project-id'
+            }
+          }
+        }
+      },
+      {
+        test: /addDraftIssueToProject/,
+        return: {
+          addProjectV2DraftIssue: {
+            projectItem: {
+              id: 'project-item-id'
+            }
+          }
+        }
+      },
+      {
+        test: /getStatusFieldId/,
+        return: {
+          user: {
+            projectV2: {
+              field: {
+                id: 'status-field-id',
+                options: [
+                  {id: 'todo-option-id', name: 'To Do'},
+                  {id: 'in-progress-option-id', name: 'In Progress'},
+                  {id: 'done-option-id', name: 'Done'}
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        test: /updateStatusFieldValue/,
+        return: {
+          projectV2Item: {
+            updatedAt: 'fake-timestamp'
+          }
+        }
+      }
+    )
+
+    await addToProject()
+
+    expect(gqlMock).toBeCalledTimes(4)
+    expect(outputs.itemId).toEqual('project-item-id')
+  })
+
+  test('throws error if status-override value does not exist as valid option on "Status" field', async () => {
+    mockGetInput({
+      'project-url': 'https://github.com/orgs/actions/projects/1',
+      'github-token': 'gh_token',
+      'status-override': 'In Progress'
+    })
+
+    github.context.payload = {
+      issue: {
+        number: 1,
+        labels: [],
+        // eslint-disable-next-line camelcase
+        html_url: 'https://github.com/actions/add-to-project/issues/74'
+      },
+      repository: {
+        name: 'add-to-project',
+        owner: {
+          login: 'actions'
+        }
+      }
+    }
+
+    const gqlMock = mockGraphQL(
+      {
+        test: /getProject/,
+        return: {
+          organization: {
+            projectV2: {
+              id: 'project-id'
+            }
+          }
+        }
+      },
+      {
+        test: /addProjectV2ItemById/,
+        return: {
+          addProjectV2ItemById: {
+            item: {
+              id: 'project-item-id'
+            }
+          }
+        }
+      },
+      {
+        test: /getStatusFieldId/,
+        return: {
+          organization: {
+            projectV2: {
+              field: {
+                id: 'status-field-id',
+                options: [
+                  {id: 'todo-option-id', name: 'To Do'},
+                  // Missing the 'In Progress' option
+                  {id: 'done-option-id', name: 'Done'}
+                ]
+              }
+            }
+          }
+        }
+      }
+    )
+
+    await expect(addToProject()).rejects.toThrow('Invalid "Status" field option value provided')
+
+    expect(gqlMock).toBeCalledTimes(3)
+    expect(outputs.itemId).toEqual('project-item-id')
   })
 })
 
